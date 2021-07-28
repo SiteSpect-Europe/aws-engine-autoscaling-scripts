@@ -1,0 +1,13 @@
+# Run engine registration and deregistration scripts periodically
+
+PATH=$MCE_SITESPECT_UTIL:$MCE_SITESPECT_BINDIR:$MCE_BINDIR:/usr/bin:/usr/sbin:/bin:/sbin
+EMAILTO=$MCE_EMAILTO
+MCE_SERVERGROUP=$MCE_SERVERGROUP
+MCE_AUTO_SCALING_GROUP_NAME=$MCE_AUTO_SCALING_GROUP_NAME
+
+# Causes "mce" to exit with status 0 if it failed to obtain an exclusive lock
+# on its pidfile.  This prevents failures due to long-running jobs.
+MCE_LOCK_EXIT_STATUS=0
+
+* * * * * $MCE_USER ${MCE_BINDIR}/mce online 1>>$MCE_ONLINE_ENGINE_LOG 2>&1
+* * * * * $MCE_USER ${MCE_BINDIR}/mce offline 1>>$MCE_OFFLINE_ENGINE_LOG 2>&1
