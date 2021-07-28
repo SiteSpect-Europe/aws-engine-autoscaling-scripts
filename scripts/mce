@@ -247,7 +247,9 @@ mce_offline_engines() {
 			mce_diag '%s: engine with node ID %s in servergroup %s at IP %s is live\n' \
 				"$MCE_SCRIPT_NAME" "$node_id" "${MCE_SERVERGROUP?}" "$primaryip"
 
-			return
+			if ! mce_dry_run; then
+				return
+			fi
 		fi
 
 		mce_offline_engine "$node_id"
