@@ -1,0 +1,443 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+MCE_SCRIPT_NAME="${0##*/}"
+
+#MCE_AUTO_SCALING_GROUP_NAME=stg-sitespect-engine-ec2
+mce_asg_instance_ids() {
+	if (( $# != 1 )); then
+		printf 1>&2 -- 'Usage: %s INSTANCE_ID\n' "${FUNCNAME[0]}"
+		return 64
+	fi
+
+	aws autoscaling describe-auto-scaling-groups \
+		--auto-scaling-group-names "$1" \
+		--query "AutoScalingGroups[*].Instances[*].InstanceId" \
+		--output text
+}
+
+mce_asg_instance_private_ip_addresses() {
+	if (( $# != 1 )); then
+		printf 1>&2 -- 'Usage: %s INSTANCE_ID\n' "${FUNCNAME[0]}"
+		return 64
+	fi
+
+	aws ec2 describe-instances --instance-ids "$1" --query "Reservations[*].Instances[*].PrivateIpAddress" --output text
+}
+
+mce_for_each_engine() {
+	if (( "$#" < 1 )); then
+		mce_for_each_engine_debug() {
+			mce_diag '[ENGINE] # %s\n' "$*"
+		}
+
+		set -- mce_for_each_engine_debug
+	fi
+
+	mce_for_each_engine_status=0
+	mce_for_each_engine_choose_status() {
+		if (( "${1:-${?:-0}}" > mce_for_each_engine_status )); then
+			mce_for_each_engine_status="${1:-0}"
+		fi
+	}
+
+	while read -r -a ids; do
+		for id in "${ids[@]}"; do
+			while read -r -a engines; do
+				for engine in "${engines[@]}"; do
+					"$@" "$engine" || mce_for_each_engine_choose_status "$?"
+				done
+			done < <(mce_asg_instance_private_ip_addresses "$id")
+		done
+	done < <(mce_asg_instance_ids "${MCE_AUTO_SCALING_GROUP_NAME?missing autoscaling group name}")
+
+	return "$mce_for_each_engine_status"
+}
+
+mce_for_each_node() {
+	if (( "$#" < 1 )); then
+		mce_for_each_node_debug() {
+			mce_diag '[NODE] # ID=%s PRIMARYIP=%s\n' "$1" "$2"
+		}
+
+		set -- mce_for_each_node_debug
+	fi
+
+	mce_validate_servergroup_id "${MCE_SERVERGROUP?}" || return
+
+	while read -r node_id primaryip; do
+		"$@" "$node_id" "$primaryip"
+	done < <(mysql sitespect -NBe "select id,primaryip from node where servergroup_id = ${MCE_SERVERGROUP?}")
+}
+
+mce_validate_integer() {
+	if (( "$#" != 1 )); then
+		printf 1>&2 -- 'Usage: %s INTEGER\n' "${FUNCNAME[0]}"
+		return 64
+	fi
+
+	if ! [[ "$1" =~ ^[[:digit:]]+$ ]]; then
+		mce_diag_always '%s: %s is not a valid integer\n' "$MCE_SCRIPT_NAME" "$1"
+		return 65 # EX_DATAERR
+	fi
+}
+
+mce_validate_nonnegative_integer() {
+	if (( "$#" != 1 )); then
+		printf 1>&2 -- 'Usage: %s INTEGER\n' "${FUNCNAME[0]}"
+		return 64
+	fi
+
+	if ! { mce_validate_integer "$1" && (( "$1" >= 0 )); } &>/dev/null; then
+		mce_diag_always '%s: %s is not a valid nonnegative integer\n' "$MCE_SCRIPT_NAME" "$1"
+		return 65 # EX_DATAERR
+	fi
+}
+
+mce_validate_servergroup_id() {
+	if (( "$#" != 1 )); then
+		printf 1>&2 -- 'Usage: %s SERVERGROUP_ID\n' "${FUNCNAME[0]}"
+		return 64
+	fi
+
+	if ! { mce_validate_integer "$1" && (( "$1" > 0 )); } &>/dev/null; then
+		mce_diag_always '%s: %s is not a valid servergroup ID (positive integer)\n' "$MCE_SCRIPT_NAME" "$1"
+		return 65 # EX_DATAERR
+	fi
+}
+
+mce_validate_ipv4() {
+	if (( "$#" != 1 )); then
+		printf 1>&2 -- 'Usage: %s IPV4_ADDRESS\n' "${FUNCNAME[0]}"
+		return 64
+	fi
+
+	if ! [[ "$1" =~ ^[[:digit:]]{1,3}(\.[[:digit:]]{1,3}){3}$ ]]; then
+		mce_diag_always '%s: %s is not a valid IPv4 address\n' "$MCE_SCRIPT_NAME" "$1"
+		return 65 # EX_DATAERR
+	fi
+}
+
+mce_fetch_node_id_from_ipv4_no_check() {
+	if (( "$#" != 1 )); then
+		printf 1>&2 -- 'Usage: %s IPV4_ADDRESS\n' "${FUNCNAME[0]}"
+		return 64
+	fi
+
+	mysql sitespect -NBe "SELECT ID FROM Node where PrimaryIP = \"${1}\" LIMIT 1"
+}
+
+mce_fetch_node_id_from_ipv4() {
+	if (( "$#" != 1 )); then
+		printf 1>&2 -- 'Usage: %s IPV4_ADDRESS\n' "${FUNCNAME[0]}"
+		return 64
+	fi
+
+	mce_validate_ipv4 "$1" || return
+
+	mce_fetch_node_id_from_ipv4_no_check "$1"
+}
+
+mce_online_engine() {
+	if (( "$#" != 1 )); then
+		printf 1>&2 -- 'Usage: %s IPV4_ADDRESS\n' "${FUNCNAME[0]}"
+		return 64
+	fi
+
+	engine="$1"
+	shift
+
+	mce_validate_ipv4 "$engine" || return
+
+	if read -r node_id < <(mce_fetch_node_id_from_ipv4 "$engine"); then
+		mce_diag '%s: engine with IP %s already belongs to servergroup %s as node ID %s\n' \
+			"$MCE_SCRIPT_NAME" "$engine" "${MCE_SERVERGROUP?}" "$node_id"
+
+		if ! mce_dry_run; then
+			return
+		fi
+	fi
+
+	mce_validate_servergroup_id "${MCE_SERVERGROUP?}" || return
+
+	mce_run manage_cluster.pl --addengine "$engine" --platform centos --servergroup "${MCE_SERVERGROUP?}"
+
+	node_id=''
+	tries="${MCE_TRIES:-5}"
+	interval=1
+
+	while (( tries > 0 )); do
+		if node_id="$(mysql sitespect -NBe "SELECT ID FROM Node where PrimaryIP = \"${engine}\" LIMIT 1")"; then
+			break
+		fi
+
+		sleep "$interval"
+
+		interval="$(( interval * 2 ))"
+		tries="$(( tries - 1 ))"
+	done
+
+	if [[ -z "${node_id:-}" ]]; then
+		mce_diag_always '%s: failed to retrieve node ID associated with engine with IP %s\n' "$MCE_SCRIPT_NAME" "$engine"
+		return 75 # EX_TEMPFAIL
+	fi
+
+	handle_registration_failure() {
+		handle_registration_failure_status="${1:-?}"
+		mce_run manage_engine_nodes.pl -c bypass --param action=bypass --node "$node_id" || :
+		mce_run manage_cluster.pl --setnodestatus down --node "$node_id" || :
+		mce_run manage_cluster.pl --deleteengine "$node_id" || :
+		return "$handle_registration_failure_status"
+	}
+
+	mce_run manage_cluster.pl --setnodestatus up --node "$node_id" || {
+		handle_registration_failure "$?"
+		return
+	}
+
+	mce_run manage_engine_nodes.pl -c bypass --param action=restore --node "$node_id" || {
+		handle_registration_failure "$?"
+		return
+	}
+}
+
+mce_online_engines() {
+	mce_for_each_engine mce_online_engine
+}
+
+mce_offline_engine() {
+	if (( "$#" != 1 )); then
+		printf 1>&2 -- 'Usage: %s NODE_ID\n' "${FUNCNAME[0]}"
+		return 64
+	fi
+
+	node_id="$1"
+	shift
+
+	mce_run manage_cluster.pl --deleteengine "$node_id"
+}
+
+mce_offline_engines() {
+	local -A engine_map
+
+	mce_offline_engines_accumulate_engines() {
+		engine_map["$1"]="$1"
+	}
+
+	mce_for_each_engine mce_offline_engines_accumulate_engines
+
+	mce_offline_engines_handle_node() {
+		node_id="$1"
+		shift
+
+		primaryip="$1"
+		shift
+
+		if [[ -n "${engine_map[$primaryip]:-}" ]]; then
+			mce_diag '%s: engine with node ID %s in servergroup %s at IP %s is live\n' \
+				"$MCE_SCRIPT_NAME" "$node_id" "${MCE_SERVERGROUP?}" "$primaryip"
+
+			return
+		fi
+
+		mce_offline_engine "$node_id"
+	}
+
+	mce_for_each_node mce_offline_engines_handle_node
+}
+
+while (( $# > 0 )); do
+	case "$1" in
+		--verbose|-v)
+			MCE_VERBOSE=1
+			;;
+		--quiet|-q)
+			unset MCE_VERBOSE
+			;;
+		--dry-run)
+			MCE_DRY_RUN=1
+			;;
+		--auto-scaling-group-name)
+			MCE_AUTO_SCALING_GROUP_NAME="$2"
+			shift
+			;;
+		--auto-scaling-group-name=?*)
+			MCE_AUTO_SCALING_GROUP_NAME="${1#*=}"
+			;;
+		--servergroup)
+			MCE_SERVERGROUP="$2"
+			shift
+			;;
+		--servergroup=?*)
+			MCE_SERVERGROUP="${1#*=}"
+			shift
+			;;
+		--lock-exit-status)
+			MCE_LOCK_EXIT_STATUS="$2"
+			shift
+			;;
+		--lock-exit-status=?*)
+			MCE_LOCK_EXIT_STATUS="${1#*=}"
+			;;
+		--pidfile-base)
+			MCE_PIDFILE_BASE="$2"
+			shift
+			;;
+		--pidfile-base=?*)
+			MCE_PIDFILE_BASE="${1#*=}"
+			;;
+		-*)
+			printf 1>&2 -- '%s: unrecognized option "%s"\n' "$MCE_SCRIPT_NAME" "$1"
+			exit 64
+			;;
+		*)
+			break
+			;;
+	esac
+
+	shift
+done
+
+mce_dry_run() {
+	 [[ -n "${MCE_DRY_RUN:-}" ]]
+}
+
+mce_verbose() {
+	 [[ -n "${MCE_VERBOSE:-}" ]]
+}
+
+mce_quiet() {
+	 ! mce_verbose
+}
+
+mce_diag_always() {
+	# shellcheck disable=SC2059
+	printf 1>&2 -- "$@"
+}
+
+if mce_quiet; then
+	mce_diag() {
+		:
+	}
+else
+	mce_diag() {
+		mce_diag_always "$@"
+	}
+fi
+
+if mce_dry_run; then
+	mce_run() {
+		mce_diag '[DRYRUN] # %s\n' "$*"
+	}
+
+	mce_lock() {
+		:
+	}
+else
+	mce_run() {
+		mce_diag '[RUN] # %s\n' "$*"
+		"$@"
+	}
+
+	mce_lock() {
+		if [[ -n "${MCE_PIDFILE_BASE:-}" ]]; then
+			pidfile_base="$MCE_PIDFILE_BASE"
+		else
+			pidfile_base=~/.mce
+		fi
+
+		pidfile="${pidfile_base}.${MCE_COMMAND:-unknown}"
+
+		exec {pidfile_fd}>>"$pidfile" || exit
+
+		flock -x -n "$pidfile_fd" || {
+			flock_status="$?"
+
+			if ! read -r pid < "$pidfile" 2>/dev/null; then
+				pid='<unknown>'
+			fi
+
+			mce_diag_always '%s: already running (pid: %s)\n' "$MCE_SCRIPT_NAME" "$pid"
+			exit "${MCE_LOCK_EXIT_STATUS:-${flock_status}}"
+		}
+
+		cleanup() {
+			rm -f --one-file-system --preserve-root "${pidfile?}"
+		}
+
+		trap cleanup exit
+
+		printf 1>"$pidfile" -- '%d\n' "$$"
+	}
+fi
+
+mce_enforce_option_definition() {
+	if (( "$#" < 1 )); then
+		printf 1>&2 -- 'Usage: %s OPTION_DESCRIPTION [CLI_FLAG] [ENVIRONMENT_VARIABLE] \n' "${FUNCNAME[0]}"
+		return 64
+	fi
+
+	desc="$1"
+	shift
+
+	if (( $# > 0 )); then
+		flag="$1"
+		shift
+	else
+		flag="--$(printf -- '%s' "$desc" | tr -c '[:alnum:]' '-')"
+	fi
+
+	if (( $# > 0 )); then
+		env="$1"
+		shift
+	else
+		env="$(printf -- '%s' "$desc" | tr -c '[:alnum:]' '_')"
+		env="${env^^}"
+	fi
+
+	printf 1>&2 -- '%s: missing required %s definition; please use the "%s" option or set the %s environment variable\n' \
+		"$MCE_SCRIPT_NAME" "$desc" "$flag" "$env"
+
+}
+
+status=0
+if [[ -z "${MCE_SERVERGROUP:-}" ]]; then
+	mce_enforce_option_definition servergroup
+	status=64
+fi
+
+if [[ -z "${MCE_SERVERGROUP:-}" ]]; then
+	mce_enforce_option_definition 'auto-scaling group name'
+	status=64
+fi
+
+if [[ -n "${MCE_LOCK_EXIT_STATUS:-}" ]]; then
+	mce_validate_nonnegative_integer "$MCE_LOCK_EXIT_STATUS" || status="$?"
+fi
+
+if (( status > 0 )); then
+	exit "$status"
+fi
+
+if (( $# == 0 )); then
+	mce_for_each_engine
+	mce_for_each_node
+else
+	export MCE_COMMAND="$1"
+	shift
+
+	case "$MCE_COMMAND" in
+		online)
+			mce_lock || exit
+			mce_online_engines
+			;;
+		offline)
+			mce_lock || exit
+			mce_offline_engines
+			;;
+		*)
+			exec "${BASH_SOURCE[0]}-${MCE_COMMAND}" "$@"
+			;;
+	esac
+fi
