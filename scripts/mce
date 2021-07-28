@@ -66,9 +66,18 @@ mce_for_each_node() {
 
 	mce_validate_servergroup_id "${MCE_SERVERGROUP?}" || return
 
+	mce_for_each_node_status=0
+	mce_for_each_node_choose_status() {
+		if (( "${1:-${?:-0}}" > mce_for_each_node_status )); then
+			mce_for_each_node_status="${1:-0}"
+		fi
+	}
+
 	while read -r node_id primaryip; do
-		"$@" "$node_id" "$primaryip"
+		"$@" "$node_id" "$primaryip" || mce_for_each_engine_choose_status "$?"
 	done < <(mysql sitespect -NBe "select id,primaryip from node where servergroup_id = ${MCE_SERVERGROUP?}")
+
+	return "$mce_for_each_node_status"
 }
 
 mce_validate_integer() {
