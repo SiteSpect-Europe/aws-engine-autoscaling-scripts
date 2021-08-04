@@ -25,11 +25,12 @@ do
     exists=$(/opt/sitespect/lib/perl/SiteSpect/Util/manage_cluster.pl --listengines | grep -c ${engine})
     if [[ ${exists} -eq 0 ]]; then
         echo "Adding ${engine} to cluster"
-        /opt/sitespect/lib/perl/SiteSpect/Util/manage_cluster.pl --addengine ${engine} --platform centos --servergroup 1
+        /opt/sitespect/lib/perl/SiteSpect/Util/manage_cluster.pl --addengine ${engine} --platform centos --servergroup 1 || continue
 	      sleep 3
         echo "Putting ${engine} online"
-        node_id=$(/opt/sitespect/lib/perl/SiteSpect/Util/manage_cluster.pl --listengines | grep ${engine} | awk '{print $1}')
-        /opt/sitespect/lib/perl/SiteSpect/Util/manage_cluster.pl --setnodestatus up --node ${node_id}
+        node_id=$(/opt/sitespect/lib/perl/SiteSpect/Util/manage_cluster.pl --listengines | grep ${engine} | awk '{print $1}') || continue
+        /opt/sitespect/lib/perl/SiteSpect/Util/manage_cluster.pl --setnodestatus up --node ${node_id} || continue
+        /opt/sitespect/lib/perl/SiteSpect/Util/manage_engine_nodes.pl -c bypass --param action=restore --node ${node_id}
     else
         echo "${engine} already part of cluster"
     fi
