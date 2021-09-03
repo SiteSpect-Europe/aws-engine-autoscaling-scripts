@@ -75,7 +75,7 @@ mce_for_each_node() {
 
 	while read -r node_id primaryip; do
 		"$@" "$node_id" "$primaryip" || mce_for_each_engine_choose_status "$?"
-	done < <(mysql sitespect -NBe "select id,primaryip from node where servergroup_id = ${MCE_SERVERGROUP?}")
+	done < <(mce_nodes_in_servergroup "${MCE_SERVERGROUP?}")
 
 	return "$mce_for_each_node_status"
 }
@@ -128,13 +128,22 @@ mce_validate_ipv4() {
 	fi
 }
 
+mce_nodes_in_servergroup() {
+	if (( "$#" != 1 )); then
+		printf 1>&2 -- 'Usage: %s SERVERGROUP_ID\n' "${FUNCNAME[0]}"
+		return 64
+	fi
+
+	mysql sitespect -NBe "SELECT ID,PrimaryIP from Node WHERE ServerGroup_ID = ${1}"
+}
+
 mce_fetch_node_id_from_ipv4_no_check() {
 	if (( "$#" != 1 )); then
 		printf 1>&2 -- 'Usage: %s IPV4_ADDRESS\n' "${FUNCNAME[0]}"
 		return 64
 	fi
 
-	mysql sitespect -NBe "SELECT ID FROM Node where PrimaryIP = \"${1}\" LIMIT 1"
+	mysql sitespect -NBe "SELECT ID FROM Node WHERE PrimaryIP = \"${1}\" LIMIT 1"
 }
 
 mce_fetch_node_id_from_ipv4() {
@@ -177,7 +186,7 @@ mce_online_engine() {
 	interval=1
 
 	while (( tries > 0 )); do
-		if node_id="$(mysql sitespect -NBe "SELECT ID FROM Node where PrimaryIP = \"${engine}\" LIMIT 1")"; then
+		if node_id="$(mce_fetch_node_id_from_ipv4_no_check "$engine")"; then
 			break
 		fi
 
