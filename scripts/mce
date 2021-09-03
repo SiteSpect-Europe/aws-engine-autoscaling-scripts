@@ -426,7 +426,7 @@ if [[ -z "${MCE_SERVERGROUP:-}" ]]; then
 	status=64
 fi
 
-if [[ -z "${MCE_SERVERGROUP:-}" ]]; then
+if [[ -z "${MCE_AUTO_SCALING_GROUP_NAME:-}" ]]; then
 	mce_enforce_option_definition 'auto-scaling group name'
 	status=64
 fi
