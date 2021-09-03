@@ -234,7 +234,7 @@ mce_online_engine() {
 
 	mce_validate_servergroup_id "${MCE_SERVERGROUP?}" || return
 
-	mce_run manage_cluster.pl --addengine "$engine" --platform centos --servergroup "${MCE_SERVERGROUP?}"
+	mce_run manage_cluster.pl --addengine "$engine" --platform centos --servergroup "${MCE_SERVERGROUP?}" || return
 
 	node_id=''
 	tries="${MCE_TRIES:-5}"
@@ -298,7 +298,7 @@ mce_offline_engines() {
 		engine_map["$1"]="$1"
 	}
 
-	mce_for_each_engine mce_offline_engines_accumulate_engines
+	mce_for_each_engine mce_offline_engines_accumulate_engines || return
 
 	mce_offline_engines_handle_node() {
 		node_id="$1"
@@ -316,7 +316,7 @@ mce_offline_engines() {
 			fi
 		fi
 
-		mce_offline_engine "$node_id"
+		mce_offline_engine "$node_id" || return
 	}
 
 	mce_for_each_node mce_offline_engines_handle_node
