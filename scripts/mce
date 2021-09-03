@@ -416,9 +416,8 @@ mce_enforce_option_definition() {
 		env="${env^^}"
 	fi
 
-	printf 1>&2 -- '%s: missing required %s definition; please use the "%s" option or set the %s environment variable\n' \
+	printf 1>&2 -- '%s: missing required %s definition; please use the "%s" option or set the MCE_%s environment variable\n' \
 		"$MCE_SCRIPT_NAME" "$desc" "$flag" "$env"
-
 }
 
 status=0
