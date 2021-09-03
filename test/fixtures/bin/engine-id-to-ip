@@ -1,0 +1,104 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+use File::Basename ();
+
+sub enginesFromString {
+    my ( %by_instance_id, %to_cluster_id );
+
+    foreach my $spec ( map { split /:/ } @_ ) {
+        my @elems = split /=/, $spec;
+        if ( scalar @elems != 3 ) {
+            die qq{error in node specification "$spec": format must follow "IP=CLUSTER_ID=INSTANCE_ID"};
+        }
+
+        $by_instance_id{$elems[2]} = $elems[0];
+        $to_cluster_id{$elems[0]} = $elems[1];
+    }
+
+    return ( \%by_instance_id, \%to_cluster_id );
+}
+
+my @breakdown = map {
+    if ( exists $ENV{$_} ) {
+        enginesFromString($ENV{$_} // '')
+    }
+    else {
+        ( {}, {} )
+    }
+} map {
+    join('_', map uc, $_, 'engines')
+} qw(
+    active_registered
+    active_unregistered
+    inactive_registered
+    inactive_unregistered
+);
+
+my (
+    $active_registered_by_instance_id,
+    $active_registered_to_cluster_id,
+    $active_unregistered_by_instance_id,
+    $active_unregistered_to_cluster_id,
+    $inactive_registered_by_instance_id,
+    $inactive_registered_to_cluster_id,
+    $inactive_unregistered_by_instance_id,
+    $inactive_unregistered_to_cluster_id,
+) = @breakdown;
+
+my ( $basename ) = File::Basename::fileparse( $0 );
+
+if ( $basename eq 'aws' ) {
+    if ( $ARGV[0] eq 'autoscaling' && $ARGV[1] eq 'describe-auto-scaling-groups' ) {
+        map CORE::say, (keys %$active_registered_by_instance_id, keys %$active_unregistered_by_instance_id);
+        exit($ENV{AWS_AUTO_SCALING_DESCRIBE_AUTO_SCALING_GROUPS_EXIT_STATUS} // 0);
+    }
+    elsif ( $ARGV[0] eq 'ec2' && $ARGV[1] eq 'describe-instances' && $ARGV[2] eq '--instance-ids' ) {
+        for my $active ( $active_registered_by_instance_id, $active_unregistered_by_instance_id ) {
+            if ( exists $active->{$ARGV[3]} ) {
+                CORE::say $active->{$ARGV[3]};
+                last;
+            }
+        }
+
+        exit($ENV{AWS_EC2_DESCRIBE_INSTANCES_EXIT_STATUS} // 0);
+    }
+    else {
+        exit 127;
+    }
+}
+elsif ( $basename eq 'mysql' ) {
+	if ( scalar @ARGV >= 3 and  my ( $servergroup_id ) = $ARGV[2] =~ /SELECT ID,PrimaryIP from Node WHERE ServerGroup_ID = (\d+)/i ) {
+        foreach my $registered ( $active_registered_to_cluster_id, $inactive_registered_to_cluster_id ) {
+            while ( my ( $primaryip, $id ) = each %$registered ) {
+                printf "%s\t%s\n", $id, $primaryip;
+            }
+        }
+
+        exit($ENV{MYSQL_NODES_IN_SERVERGROUP_EXIT_STATUS} // 0);
+    }
+    elsif ( scalar @ARGV >= 3 and my ( $primaryip ) = $ARGV[2] =~ /SELECT ID FROM Node WHERE PrimaryIP = "(\S+)" LIMIT 1/i ) {
+        foreach my $registered ( $active_registered_to_cluster_id, $inactive_registered_to_cluster_id ) {
+            if ( exists $registered->{$primaryip} ) {
+                CORE::say $registered->{$primaryip};
+                last;
+            }
+        }
+
+        exit($ENV{MYSQL_FETCH_NODE_ID_FROM_IPV4_EXIT_STATUS} // 0);
+    }
+    else {
+        exit 127;
+    }
+}
+elsif ( $basename eq 'manage_engine_nodes.pl' ) {
+    exit($ENV{MANAGE_ENGINE_NODES_EXIT_STATUS} // 0);
+}
+elsif ( $basename eq 'manage_cluster.pl' ) {
+    exit($ENV{MANAGE_CLUSTER_EXIT_STATUS} // 0);
+}
+else {
+    exit 127;
+}

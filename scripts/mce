@@ -236,6 +236,9 @@ mce_online_engine() {
 
 	mce_run manage_cluster.pl --addengine "$engine" --platform centos --servergroup "${MCE_SERVERGROUP?}" || return
 
+	# Hook for testing code to detect (newly) active registered engines
+	export ACTIVE_REGISTERED_ENGINES="${ACTIVE_REGISTERED_ENGINES:+${ACTIVE_REGISTERED_ENGINES}:}${engine}=${RANDOM}=${RANDOM}"
+
 	node_id=''
 	tries="${MCE_TRIES:-5}"
 	interval=1
@@ -317,6 +320,9 @@ mce_offline_engines() {
 		fi
 
 		mce_offline_engine "$node_id" || return
+
+		# Hook for testing code to detect (newly) inactive unregistered engines
+		export INACTIVE_UNREGISTERED_ENGINES="${INACTIVE_UNREGISTERED_ENGINES:+${INACTIVE_UNREGISTERED_ENGINES}:}${RANDOM}=${node_id}=${RANDOM}"
 	}
 
 	mce_for_each_node mce_offline_engines_handle_node
