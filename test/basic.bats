@@ -1,4 +1,19 @@
-PATH="${BATS_TEST_DIRNAME}/../scripts:${BATS_TEST_DIRNAME}/fixtures/bin:${PATH}"
+export PATH="${BATS_TEST_DIRNAME}/../scripts:${BATS_TEST_DIRNAME}/fixtures/bin:${PATH}"
+
+# Put pidfile stuff in this dir
+for dir in "$BATS_TEST_DIRNAME" "${TMPDIR:-/tmp}"; do
+    if [[ -w "$dir" ]] && tmpfile="$(mktemp "${dir}/.write-test.XXXXXXXXXX")"; then
+        rm -f "$tmpfile"
+        MCE_PIDFILE_BASE="${dir}/.mce"
+    fi
+done
+
+if [[ -z "${MCE_PIDFILE_BASE:-}" ]]; then
+    printf 1>&2 -- '%s: cannot find a writeable path for the mce PID file; please specify a PID file template in a writeable path via the MCE_PIDFILE_BASE environment variable.\n'
+    exit 75 # EX_TEMPFAIL
+fi
+
+export MCE_PIDFILE_BASE
 
 ACTIVE_REGISTERED_IP=1.1.1.1
 ACTIVE_REGISTERED_NODE_ID=1
