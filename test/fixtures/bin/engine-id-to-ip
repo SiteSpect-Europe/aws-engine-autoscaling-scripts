@@ -5,6 +5,47 @@ use warnings;
 
 use File::Basename ();
 
+sub parseTimeout {
+    my ( $expr ) = @_;
+
+    my ( $n, $base ) = $expr =~ /^(\d+(?:\.\d+)?)([smhd])?$/ or die "invalid timeout expression: $expr";
+
+    return $n if (! defined $base or $base eq 's');
+
+    $n *= 60;
+    return $n * 60 if $base eq 'm';
+
+    $n *= 60;
+    return $n if $base eq 'h';
+
+    $n *= 24;
+    return $n if $base eq 'd';
+
+    die "should never get here; timeout expression: $expr";
+}
+
+sub blockForTimeout {
+    sleep parseTimeout(@_);
+}
+
+sub envBlockForTimeout {
+    die "please specify an environment variable name" unless defined $_[0];
+
+    blockForTimeout( $ENV{$_[0]} ) if exists $ENV{$_[0]};
+}
+
+sub awsConditionalBlockForTimeout {
+    envBlockForTimeout( 'AWS_FORCED_TIMEOUT' );
+}
+
+sub manageEngineNodesConditionalBlockForTimeout {
+    envBlockForTimeout( 'MANAGE_ENGINE_NODES_FORCED_TIMEOUT' );
+}
+
+sub manageClusterConditionalBlockForTimeout {
+    envBlockForTimeout( 'MANAGE_CLUSTER_FORCED_TIMEOUT' );
+}
+
 sub enginesFromString {
     my ( %by_instance_id, %to_cluster_id );
 
@@ -52,10 +93,12 @@ my ( $basename ) = File::Basename::fileparse( $0 );
 
 if ( $basename eq 'aws' ) {
     if ( $ARGV[0] eq 'autoscaling' && $ARGV[1] eq 'describe-auto-scaling-groups' ) {
+        awsConditionalBlockForTimeout;
         map CORE::say, (keys %$active_registered_by_instance_id, keys %$active_unregistered_by_instance_id);
         exit($ENV{AWS_AUTO_SCALING_DESCRIBE_AUTO_SCALING_GROUPS_EXIT_STATUS} // 0);
     }
     elsif ( $ARGV[0] eq 'ec2' && $ARGV[1] eq 'describe-instances' && $ARGV[2] eq '--instance-ids' ) {
+        awsConditionalBlockForTimeout;
         for my $active ( $active_registered_by_instance_id, $active_unregistered_by_instance_id ) {
             if ( exists $active->{$ARGV[3]} ) {
                 CORE::say $active->{$ARGV[3]};
@@ -94,9 +137,11 @@ elsif ( $basename eq 'mysql' ) {
     }
 }
 elsif ( $basename eq 'manage_engine_nodes.pl' ) {
+    manageEngineNodesConditionalBlockForTimeout;
     exit($ENV{MANAGE_ENGINE_NODES_EXIT_STATUS} // 0);
 }
 elsif ( $basename eq 'manage_cluster.pl' ) {
+    manageClusterConditionalBlockForTimeout;
     exit($ENV{MANAGE_CLUSTER_EXIT_STATUS} // 0);
 }
 else {

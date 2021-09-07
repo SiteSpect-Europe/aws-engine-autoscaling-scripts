@@ -5,13 +5,18 @@ set -euo pipefail
 MCE_SCRIPT_NAME="${0##*/}"
 
 #MCE_AUTO_SCALING_GROUP_NAME=stg-sitespect-engine-ec2
+
+mce_aws_with_timeout() {
+	timeout "${MCE_AWS_TIMEOUT:-15s}" aws "$@"
+}
+
 mce_asg_instance_ids() {
 	if (( $# != 1 )); then
 		printf 1>&2 -- 'Usage: %s INSTANCE_ID\n' "${FUNCNAME[0]}"
 		return 64
 	fi
 
-	aws autoscaling describe-auto-scaling-groups \
+	mce_aws_with_timeout autoscaling describe-auto-scaling-groups \
 		--auto-scaling-group-names "$1" \
 		--query "AutoScalingGroups[*].Instances[*].InstanceId" \
 		--output text
@@ -23,7 +28,10 @@ mce_asg_instance_private_ip_addresses() {
 		return 64
 	fi
 
-	aws ec2 describe-instances --instance-ids "$1" --query "Reservations[*].Instances[*].PrivateIpAddress" --output text
+	mce_aws_with_timeout ec2 describe-instances \
+		--instance-ids "$1" \
+		--query "Reservations[*].Instances[*].PrivateIpAddress" \
+		--output text
 }
 
 mce_finish_with_exit_status() {
