@@ -74,7 +74,7 @@ run_mce_cluster_actions_take_too_long() {
 
     (( status == 0 ))
 
-    #[[ "$output" != *'manage_cluster.pl'*'addengine'*"${ACTIVE_REGISTERED_IP}"* ]]
+    [[ "$output" != *'manage_cluster.pl'*'addengine'*"${ACTIVE_REGISTERED_IP}"* ]]
     [[ "$output" == *'manage_cluster.pl'*'addengine'*"${ACTIVE_UNREGISTERED_IP}"* ]]
     [[ "$output" != *'manage_cluster.pl'*'addengine'*"${INACTIVE_REGISTERED_IP}"* ]]
     [[ "$output" != *'manage_cluster.pl'*'addengine'*"${INACTIVE_UNREGISTERED_IP}"* ]]
@@ -89,7 +89,7 @@ run_mce_cluster_actions_take_too_long() {
 
     (( status == 0 ))
 
-    #[[ "$output" != *'manage_cluster.pl'*'deleteengine'*"$ACTIVE_REGISTERED_NODE_ID"* ]]
+    [[ "$output" != *'manage_cluster.pl'*'deleteengine'*"$ACTIVE_REGISTERED_NODE_ID"* ]]
     [[ "$output" != *'manage_cluster.pl'*'deleteengine'*"$ACTIVE_UNREGISTERED_NODE_ID"* ]]
     [[ "$output" == *'manage_cluster.pl'*'deleteengine'*"$INACTIVE_REGISTERED_NODE_ID"* ]]
     [[ "$output" != *'manage_cluster.pl'*'deleteengine'*"$INACTIVE_UNREGISTERED_NODE_ID"* ]]
@@ -100,7 +100,7 @@ run_mce_cluster_actions_take_too_long() {
 
     (( status != 0 ))
 
-    #[[ "$output" != *'manage_cluster.pl'*'addengine'*"${ACTIVE_REGISTERED_IP}"* ]]
+    [[ "$output" != *'manage_cluster.pl'*'addengine'*"${ACTIVE_REGISTERED_IP}"* ]]
     [[ "$output" == *'manage_cluster.pl'*'addengine'*"${ACTIVE_UNREGISTERED_IP}"* ]]
     [[ "$output" != *'manage_cluster.pl'*'addengine'*"${INACTIVE_REGISTERED_IP}"* ]]
     [[ "$output" != *'manage_cluster.pl'*'addengine'*"${INACTIVE_UNREGISTERED_IP}"* ]]
@@ -115,7 +115,7 @@ run_mce_cluster_actions_take_too_long() {
 
     (( status != 0 ))
 
-    #[[ "$output" != *'manage_cluster.pl'*'addengine'*"${ACTIVE_REGISTERED_IP}"* ]]
+    [[ "$output" != *'manage_cluster.pl'*'addengine'*"${ACTIVE_REGISTERED_IP}"* ]]
     [[ "$output" == *'manage_cluster.pl'*'addengine'*"${ACTIVE_UNREGISTERED_IP}"* ]]
     [[ "$output" != *'manage_cluster.pl'*'addengine'*"${INACTIVE_REGISTERED_IP}"* ]]
     [[ "$output" != *'manage_cluster.pl'*'addengine'*"${INACTIVE_UNREGISTERED_IP}"* ]]
