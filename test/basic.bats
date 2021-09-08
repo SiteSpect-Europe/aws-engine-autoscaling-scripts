@@ -59,11 +59,11 @@ run_mce_fail_mysql_fetch_node_id_from_ipv4() {
 }
 
 run_mce_aws_take_too_long() {
-    MCE_AWS_TIMEOUT=0.1s AWS_FORCED_TIMEOUT=1s run_mce "$@"
+    MCE_AWS_CLI_GLOBAL_TIMEOUT=0.1s AWS_FORCED_TIMEOUT=1s run_mce "$@"
 }
 
 run_mce_cluster_actions_take_too_long() {
-    MCE_AWS_TIMEOUT=0.2s \
+    MCE_AWS_CLI_GLOBAL_TIMEOUT=0.2s \
     MANAGE_CLUSTER_FORCED_TIMEOUT=0.5s \
     MANAGE_ENGINE_NODES_FORCED_TIMEOUT=0.5s \
     run_mce "$@"

@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 use File::Basename ();
+use Getopt::Long qw(:config no_ignore_case bundling);
 
 sub parseTimeout {
     my ( $expr ) = @_;
@@ -89,19 +90,59 @@ my (
     $inactive_unregistered_to_cluster_id,
 ) = @breakdown;
 
+my $op;
+my $subop;
+my %opts;
+GetOptions(
+    \%opts,
+    # aws
+    'cli-read-timeout=i',
+    'cli-connect-timeout=i',
+    'auto-scaling-group-names=s',
+    'instance-ids=s',
+    'query=s',
+    'output=s',
+
+    # mysql
+    '-N',
+    '-B',
+    '-e=s',
+
+    # manage_cluster.pl
+    'addengine',
+    'addengine=s',
+    'platform=s',
+    'servergroup=i',
+    'setnodestatus=s',
+    'node=i',
+    'deleteengine=i',
+
+    # manage_engine_nodes.pl
+    'c=s',
+    'param=s%',
+
+    # aws
+    '<>' => sub {
+        return $op = $_[0] unless defined $op;
+        return $subop = $_[0] unless defined $subop;
+        die "unrecognized parameter: $_[0]";
+    },
+) or die "error in options";
+
 my ( $basename ) = File::Basename::fileparse( $0 );
 
 if ( $basename eq 'aws' ) {
-    if ( $ARGV[0] eq 'autoscaling' && $ARGV[1] eq 'describe-auto-scaling-groups' ) {
+    if ( $op eq 'autoscaling' && $subop eq 'describe-auto-scaling-groups' && exists $opts{'auto-scaling-group-names'} ) {
         awsConditionalBlockForTimeout;
         map CORE::say, (keys %$active_registered_by_instance_id, keys %$active_unregistered_by_instance_id);
         exit($ENV{AWS_AUTO_SCALING_DESCRIBE_AUTO_SCALING_GROUPS_EXIT_STATUS} // 0);
     }
-    elsif ( $ARGV[0] eq 'ec2' && $ARGV[1] eq 'describe-instances' && $ARGV[2] eq '--instance-ids' ) {
+    elsif ( $op eq 'ec2' && $subop eq 'describe-instances' && exists $opts{'instance-ids'} ) {
+        my $iids = $opts{'instance-ids'};
         awsConditionalBlockForTimeout;
         for my $active ( $active_registered_by_instance_id, $active_unregistered_by_instance_id ) {
-            if ( exists $active->{$ARGV[3]} ) {
-                CORE::say $active->{$ARGV[3]};
+            if ( exists $active->{$iids} ) {
+                CORE::say $active->{$iids};
                 last;
             }
         }
@@ -113,7 +154,7 @@ if ( $basename eq 'aws' ) {
     }
 }
 elsif ( $basename eq 'mysql' ) {
-	if ( scalar @ARGV >= 3 and  my ( $servergroup_id ) = $ARGV[2] =~ /SELECT ID,PrimaryIP from Node WHERE ServerGroup_ID = (\d+)/i ) {
+	if ( exists $opts{e} and my ( $servergroup_id ) = $opts{e} =~ /SELECT ID,PrimaryIP from Node WHERE ServerGroup_ID = (\d+)/i ) {
         foreach my $registered ( $active_registered_to_cluster_id, $inactive_registered_to_cluster_id ) {
             while ( my ( $primaryip, $id ) = each %$registered ) {
                 printf "%s\t%s\n", $id, $primaryip;
@@ -122,7 +163,7 @@ elsif ( $basename eq 'mysql' ) {
 
         exit($ENV{MYSQL_NODES_IN_SERVERGROUP_EXIT_STATUS} // 0);
     }
-    elsif ( scalar @ARGV >= 3 and my ( $primaryip ) = $ARGV[2] =~ /SELECT ID FROM Node WHERE PrimaryIP = "(\S+)" LIMIT 1/i ) {
+    elsif ( exists $opts{e} and my ( $primaryip ) = $opts{e} =~ /SELECT ID FROM Node WHERE PrimaryIP = "(\S+)" LIMIT 1/i ) {
         foreach my $registered ( $active_registered_to_cluster_id, $inactive_registered_to_cluster_id ) {
             if ( exists $registered->{$primaryip} ) {
                 CORE::say $registered->{$primaryip};

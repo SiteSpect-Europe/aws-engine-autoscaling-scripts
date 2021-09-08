@@ -7,7 +7,10 @@ MCE_SCRIPT_NAME="${0##*/}"
 #MCE_AUTO_SCALING_GROUP_NAME=stg-sitespect-engine-ec2
 
 mce_aws_with_timeout() {
-	timeout "${MCE_AWS_TIMEOUT:-15s}" aws "$@"
+	timeout "${MCE_AWS_CLI_GLOBAL_TIMEOUT:-45}" aws \
+		--cli-read-timeout "${MCE_AWS_CLI_READ_TIMEOUT:-15}" \
+		--cli-connect-timeout "${MCE_AWS_CLI_CONNECT_TIMEOUT:-15}" \
+		"$@"
 }
 
 mce_asg_instance_ids() {
