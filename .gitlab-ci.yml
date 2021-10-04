@@ -1,0 +1,59 @@
+include:
+    - project: 'qa/gitlab-shellcheck-codequality'
+      file: '/templates/concrete.gitlab-ci.yml'
+    - project: 'qa/gitlab-confluence-sync'
+      file: '/templates/concrete.gitlab-ci.yml'
+
+stages:
+  - debug
+  - lint
+  - test
+  - deploy
+
+variables:
+    MARK_USERNAME: '$ATLASSIAN_BOT_USERNAME'
+    MARK_PASSWORD: '$ATLASSIAN_BOT_API_TOKEN'
+
+mark:dry:
+  extends: .mark:dry
+  stage: debug
+
+shellcheck-codequality:
+  extends: .shellcheck-codequality
+  stage: lint
+
+bats:
+  image:
+    name: bats/bats
+    entrypoint: ['']
+  stage: test
+  before_script:
+    # mce uses coreutils-specific rm flags
+    - apk add -U --no-cache coreutils
+  script:
+    - bats --tap ./test
+
+pkg:
+  image: alpine
+  stage: deploy
+  before_script:
+    - apk add -U --no-cache coreutils make tar gettext
+  script:
+    - make pkg
+  artifacts:
+    expose_as: mce
+    name: 'mce-${CI_COMMIT_REF_SLUG}'
+    paths:
+      - ./pkg/mce.tar.gz
+  # Only run this job on the default branch
+  rules:
+      - if: '$CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH'
+        when: on_success
+
+mark:
+  extends: .mark
+  stage: deploy
+  # Only run this job on the default branch
+  rules:
+      - if: '$CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH'
+        when: always

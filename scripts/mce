@@ -5,13 +5,21 @@ set -euo pipefail
 MCE_SCRIPT_NAME="${0##*/}"
 
 #MCE_AUTO_SCALING_GROUP_NAME=stg-sitespect-engine-ec2
+
+mce_aws_with_timeout() {
+	timeout "${MCE_AWS_CLI_GLOBAL_TIMEOUT:-45}" aws \
+		--cli-read-timeout "${MCE_AWS_CLI_READ_TIMEOUT:-15}" \
+		--cli-connect-timeout "${MCE_AWS_CLI_CONNECT_TIMEOUT:-15}" \
+		"$@"
+}
+
 mce_asg_instance_ids() {
 	if (( $# != 1 )); then
 		printf 1>&2 -- 'Usage: %s INSTANCE_ID\n' "${FUNCNAME[0]}"
 		return 64
 	fi
 
-	aws autoscaling describe-auto-scaling-groups \
+	mce_aws_with_timeout autoscaling describe-auto-scaling-groups \
 		--auto-scaling-group-names "$1" \
 		--query "AutoScalingGroups[*].Instances[*].InstanceId" \
 		--output text
@@ -23,7 +31,37 @@ mce_asg_instance_private_ip_addresses() {
 		return 64
 	fi
 
-	aws ec2 describe-instances --instance-ids "$1" --query "Reservations[*].Instances[*].PrivateIpAddress" --output text
+	mce_aws_with_timeout ec2 describe-instances \
+		--instance-ids "$1" \
+		--query "Reservations[*].Instances[*].PrivateIpAddress" \
+		--output text
+}
+
+mce_finish_with_exit_status() {
+	mce_finish_with_exit_status_status=0
+	"$@" || mce_finish_with_exit_status_status="$?"
+	printf -- '+EXITSTATUS:%d\n' "$mce_finish_with_exit_status_status"
+	return "$mce_finish_with_exit_status_status"
+}
+
+mce_looks_like_exit_status_line() {
+	if (( $# != 1 )); then
+		printf 1>&2 -- 'Usage: %s MAYBE_EXIT_STATUS\n' "${FUNCNAME[0]}"
+		return 64
+	fi
+
+	[[ "$1" == +EXITSTATUS:?* ]]
+}
+
+mce_trim_exit_status() {
+	if (( $# != 1 )); then
+		printf 1>&2 -- 'Usage: %s MAYBE_EXIT_STATUS\n' "${FUNCNAME[0]}"
+		return 64
+	fi
+
+	mce_looks_like_exit_status_line "$1" || return
+
+	printf -- '%s' "${1#+EXITSTATUS:}"
 }
 
 mce_for_each_engine() {
@@ -43,14 +81,32 @@ mce_for_each_engine() {
 	}
 
 	while read -r -a ids; do
+		if mce_for_each_engine_read_ids_status="$(mce_trim_exit_status "${ids[0]}")"; then
+			if (( mce_for_each_engine_read_ids_status > 0 )); then
+				mce_for_each_engine_choose_status "$mce_for_each_engine_read_ids_status"
+				mce_diag_always '%s: failed to list autoscaling instance IDs\n' "$MCE_SCRIPT_NAME"
+			fi
+
+			break
+		fi
+
 		for id in "${ids[@]}"; do
 			while read -r -a engines; do
+				if mce_for_each_engine_read_ips_status="$(mce_trim_exit_status "${engines[0]}")"; then
+					if (( mce_for_each_engine_read_ips_status > 0 )); then
+						mce_for_each_engine_choose_status "$mce_for_each_engine_read_ips_status"
+						mce_diag_always '%s: failed to list private IPs for autoscaling instance ID %s\n' "$MCE_SCRIPT_NAME" "$id"
+					fi
+
+					break
+				fi
+
 				for engine in "${engines[@]}"; do
 					"$@" "$engine" || mce_for_each_engine_choose_status "$?"
 				done
-			done < <(mce_asg_instance_private_ip_addresses "$id")
+			done < <(mce_finish_with_exit_status mce_asg_instance_private_ip_addresses "$id")
 		done
-	done < <(mce_asg_instance_ids "${MCE_AUTO_SCALING_GROUP_NAME?missing autoscaling group name}")
+	done < <(mce_finish_with_exit_status mce_asg_instance_ids "${MCE_AUTO_SCALING_GROUP_NAME?}")
 
 	return "$mce_for_each_engine_status"
 }
@@ -74,8 +130,18 @@ mce_for_each_node() {
 	}
 
 	while read -r node_id primaryip; do
-		"$@" "$node_id" "$primaryip" || mce_for_each_engine_choose_status "$?"
-	done < <(mce_nodes_in_servergroup "${MCE_SERVERGROUP?}")
+		if mce_for_each_node_read_node_status="$(mce_trim_exit_status "$node_id")"; then
+			if (( mce_for_each_node_read_node_status > 0 )); then
+				mce_for_each_node_choose_status "$mce_for_each_node_read_node_status"
+				mce_diag_always '%s: failed to read Node.ID and Node.PrimaryIP for nodes in servergroup %s\n' \
+					"$MCE_SCRIPT_NAME" "${MCE_SERVERGROUP?}"
+			fi
+
+			break
+		fi
+
+		"$@" "$node_id" "$primaryip" || mce_for_each_node_choose_status "$?"
+	done < <(mce_finish_with_exit_status mce_nodes_in_servergroup "${MCE_SERVERGROUP?}")
 
 	return "$mce_for_each_node_status"
 }
@@ -179,7 +245,10 @@ mce_online_engine() {
 
 	mce_validate_servergroup_id "${MCE_SERVERGROUP?}" || return
 
-	mce_run manage_cluster.pl --addengine "$engine" --platform centos --servergroup "${MCE_SERVERGROUP?}"
+	mce_run manage_cluster.pl --addengine "$engine" --platform centos --servergroup "${MCE_SERVERGROUP?}" || return
+
+	# Hook for testing code to detect (newly) active registered engines
+	export ACTIVE_REGISTERED_ENGINES="${ACTIVE_REGISTERED_ENGINES:+${ACTIVE_REGISTERED_ENGINES}:}${engine}=${RANDOM}=${RANDOM}"
 
 	node_id=''
 	tries="${MCE_TRIES:-5}"
@@ -243,7 +312,7 @@ mce_offline_engines() {
 		engine_map["$1"]="$1"
 	}
 
-	mce_for_each_engine mce_offline_engines_accumulate_engines
+	mce_for_each_engine mce_offline_engines_accumulate_engines || return
 
 	mce_offline_engines_handle_node() {
 		node_id="$1"
@@ -261,7 +330,10 @@ mce_offline_engines() {
 			fi
 		fi
 
-		mce_offline_engine "$node_id"
+		mce_offline_engine "$node_id" || return
+
+		# Hook for testing code to detect (newly) inactive unregistered engines
+		export INACTIVE_UNREGISTERED_ENGINES="${INACTIVE_UNREGISTERED_ENGINES:+${INACTIVE_UNREGISTERED_ENGINES}:}${RANDOM}=${node_id}=${RANDOM}"
 	}
 
 	mce_for_each_node mce_offline_engines_handle_node
