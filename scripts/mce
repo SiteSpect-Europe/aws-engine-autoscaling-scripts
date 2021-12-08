@@ -381,7 +381,7 @@ mce_assert_required_argument() {
 					fi
 					;;
 				*)
-					printf 1>&2 -- 'Usage: %s CLI_FLAG_WITH_EQUALS_SIGN\n' "${FUNCNAME[0]}"
+					printf 1>&2 -- 'Usage: %s [CLI_FLAG NUMBER_OF_ARGUMENTS | CLI_FLAG_WITH_EQUALS_SIGN]\n' "${FUNCNAME[0]}"
 					return 64
 					;;
 			esac
