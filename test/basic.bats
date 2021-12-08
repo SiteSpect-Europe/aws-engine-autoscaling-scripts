@@ -160,3 +160,53 @@ run_mce_cluster_actions_take_too_long() {
 
     (( status == 0 ))
 }
+
+@test 'accepts command-line arguments' {
+    # 1. For options that take arguments, use the space-separated *and*
+    #    equals-sign-separated forms, and
+    # 2. Test actions ("offline", "online") mixed in with options, and also
+    #    appended to options.
+    run_mce \
+        --verbose -v \
+        --quiet -q \
+        --dry-run \
+        offline \
+		--auto-scaling-group-name foo \
+		--auto-scaling-group-name=bar \
+		--servergroup 1 \
+		--servergroup=2 \
+        online \
+		--lock-exit-status 3 \
+		--lock-exit-status=4 \
+		--pidfile-base /this \
+		--pidfile-base=/that \
+        offline \
+        online
+
+    [[ "$output" != *'unrecognized argument'* ]]
+
+}
+
+@test 'requires arguments for certain command-line options' {
+    local -a opts=(
+		--auto-scaling-group-name
+		--servergroup
+		--lock-exit-status
+		--pidfile-base
+    )
+
+    local opt
+    for opt in "${opts[@]}"; do
+        for form in "$opt" "${opt}="; do
+            run_mce "$form"
+            (( status == 64 ))
+            [[ "$output" == *'missing required argument to "'$opt'" option'* ]]
+        done
+    done
+}
+
+@test 'rejects unknown command-line arguments' {
+    run_mce --haha-nope
+    (( status == 64 ))
+    [[ "$output" == *'unrecognized argument'*'--haha-nope'* ]]
+}

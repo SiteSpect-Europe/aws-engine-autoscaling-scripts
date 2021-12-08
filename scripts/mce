@@ -339,6 +339,42 @@ mce_offline_engines() {
 	mce_for_each_node mce_offline_engines_handle_node
 }
 
+mce_assert_required_argument() {
+	case "$#" in
+		2)
+			local option="$1"
+			local -i argc="$2"
+
+			if (( argc < 2 )); then
+				printf 1>&2 -- '%s: missing required argument to "%s" option\n' \
+					"$MCE_SCRIPT_NAME" "$option"
+				return 64
+			fi
+			;;
+		1)
+			case "$1" in
+				*=*)
+					local arg="${1#*=}"
+					if (( "${#arg}" < 1 )); then
+						printf 1>&2 -- '%s: missing required argument to "%s" option\n' \
+							"$MCE_SCRIPT_NAME" "${1%%=*}"
+						return 64
+					fi
+					;;
+				*)
+					printf 1>&2 -- 'Usage: %s CLI_FLAG_WITH_EQUALS_SIGN\n' "${FUNCNAME[0]}"
+					return 64
+					;;
+			esac
+
+			;;
+		*)
+			printf 1>&2 -- 'Usage: %s [CLI_FLAG NUMBER_OF_ARGUMENTS | CLI_FLAG_WITH_EQUALS_SIGN]\n' "${FUNCNAME[0]}"
+			return 64
+			;;
+	esac
+}
+
 while (( $# > 0 )); do
 	case "$1" in
 		--verbose|-v)
@@ -351,40 +387,47 @@ while (( $# > 0 )); do
 			MCE_DRY_RUN=1
 			;;
 		--auto-scaling-group-name)
+			mce_assert_required_argument "$1" "$#" || exit
 			MCE_AUTO_SCALING_GROUP_NAME="$2"
 			shift
 			;;
-		--auto-scaling-group-name=?*)
+		--auto-scaling-group-name=*)
+			mce_assert_required_argument "$1" || exit
 			MCE_AUTO_SCALING_GROUP_NAME="${1#*=}"
 			;;
 		--servergroup)
+			mce_assert_required_argument "$1" "$#" || exit
 			MCE_SERVERGROUP="$2"
 			shift
 			;;
-		--servergroup=?*)
+		--servergroup=*)
+			mce_assert_required_argument "$1" || exit
 			MCE_SERVERGROUP="${1#*=}"
-			shift
 			;;
 		--lock-exit-status)
+			mce_assert_required_argument "$1" "$#" || exit
 			MCE_LOCK_EXIT_STATUS="$2"
 			shift
 			;;
-		--lock-exit-status=?*)
+		--lock-exit-status=*)
+			mce_assert_required_argument "$1" || exit
 			MCE_LOCK_EXIT_STATUS="${1#*=}"
 			;;
 		--pidfile-base)
+			mce_assert_required_argument "$1" "$#" || exit
 			MCE_PIDFILE_BASE="$2"
 			shift
 			;;
-		--pidfile-base=?*)
+		--pidfile-base=*)
+			mce_assert_required_argument "$1" || exit
 			MCE_PIDFILE_BASE="${1#*=}"
 			;;
-		-*)
-			printf 1>&2 -- '%s: unrecognized option "%s"\n' "$MCE_SCRIPT_NAME" "$1"
-			exit 64
+		online|offline)
+			MCE_COMMAND="$1"
 			;;
 		*)
-			break
+			printf 1>&2 -- '%s: unrecognized argument "%s"\n' "$MCE_SCRIPT_NAME" "$1"
+			exit 64
 			;;
 	esac
 
@@ -511,12 +554,11 @@ if (( status > 0 )); then
 	exit "$status"
 fi
 
-if (( $# == 0 )); then
+if [[ -z "${MCE_COMMAND:-}" ]]; then
 	mce_for_each_engine
 	mce_for_each_node
 else
-	export MCE_COMMAND="$1"
-	shift
+	export MCE_COMMAND
 
 	case "$MCE_COMMAND" in
 		online)
@@ -528,7 +570,7 @@ else
 			mce_offline_engines
 			;;
 		*)
-			exec "${BASH_SOURCE[0]}-${MCE_COMMAND}" "$@"
+			mce_diag_always '%s: unrecognized command "%s"\n' "$MCE_SCRIPT_NAME" "$MCE_COMMAND"
 			;;
 	esac
 fi
