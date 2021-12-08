@@ -134,16 +134,20 @@ my ( $basename ) = File::Basename::fileparse( $0 );
 if ( $basename eq 'aws' ) {
     if ( $op eq 'autoscaling' && $subop eq 'describe-auto-scaling-groups' && exists $opts{'auto-scaling-group-names'} ) {
         awsConditionalBlockForTimeout;
-        map CORE::say, (keys %$active_registered_by_instance_id, keys %$active_unregistered_by_instance_id);
+        unless ( $ENV{AWS_AUTO_SCALING_DESCRIBE_AUTO_SCALING_GROUPS_EMPTY} ) {
+            map CORE::say, (keys %$active_registered_by_instance_id, keys %$active_unregistered_by_instance_id);
+        }
         exit($ENV{AWS_AUTO_SCALING_DESCRIBE_AUTO_SCALING_GROUPS_EXIT_STATUS} // 0);
     }
     elsif ( $op eq 'ec2' && $subop eq 'describe-instances' && exists $opts{'instance-ids'} ) {
         my $iids = $opts{'instance-ids'};
         awsConditionalBlockForTimeout;
-        for my $active ( $active_registered_by_instance_id, $active_unregistered_by_instance_id ) {
-            if ( exists $active->{$iids} ) {
-                CORE::say $active->{$iids};
-                last;
+        unless ( $ENV{AWS_EC2_DESCRIBE_INSTANCES_EMPTY} ) {
+            for my $active ( $active_registered_by_instance_id, $active_unregistered_by_instance_id ) {
+                if ( exists $active->{$iids} ) {
+                    CORE::say $active->{$iids};
+                    last;
+                }
             }
         }
 

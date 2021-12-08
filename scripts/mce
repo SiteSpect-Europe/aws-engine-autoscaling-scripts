@@ -80,33 +80,52 @@ mce_for_each_engine() {
 		fi
 	}
 
+	local -i ids_read=0
 	while read -r -a ids; do
-		if mce_for_each_engine_read_ids_status="$(mce_trim_exit_status "${ids[0]}")"; then
-			if (( mce_for_each_engine_read_ids_status > 0 )); then
-				mce_for_each_engine_choose_status "$mce_for_each_engine_read_ids_status"
-				mce_diag_always '%s: failed to list autoscaling instance IDs\n' "$MCE_SCRIPT_NAME"
-			fi
-
-			break
-		fi
-
 		for id in "${ids[@]}"; do
-			while read -r -a engines; do
-				if mce_for_each_engine_read_ips_status="$(mce_trim_exit_status "${engines[0]}")"; then
-					if (( mce_for_each_engine_read_ips_status > 0 )); then
-						mce_for_each_engine_choose_status "$mce_for_each_engine_read_ips_status"
-						mce_diag_always '%s: failed to list private IPs for autoscaling instance ID %s\n' "$MCE_SCRIPT_NAME" "$id"
-					fi
-
-					break
+			if mce_for_each_engine_read_ids_status="$(mce_trim_exit_status "$id")"; then
+				if (( mce_for_each_engine_read_ids_status > 0 )); then
+					mce_for_each_engine_choose_status "$mce_for_each_engine_read_ids_status"
+					mce_diag_always '%s: failed to list autoscaling instance IDs for auto-scaling group "%s"\n' \
+						"$MCE_SCRIPT_NAME" "${MCE_AUTO_SCALING_GROUP_NAME?}"
 				fi
 
+				break 2
+			fi
+
+			ids_read="$(( ids_read + 1 ))"
+
+			local -i engines_read=0
+
+			while read -r -a engines; do
 				for engine in "${engines[@]}"; do
+					if mce_for_each_engine_read_ips_status="$(mce_trim_exit_status "$engine")"; then
+						if (( mce_for_each_engine_read_ips_status > 0 )); then
+							mce_for_each_engine_choose_status "$mce_for_each_engine_read_ips_status"
+							mce_diag_always '%s: failed to list private IPs for autoscaling instance ID %s in auto-scaling group "%s"\n' \
+								"$MCE_SCRIPT_NAME" "$id" "${MCE_AUTO_SCALING_GROUP_NAME?}"
+						fi
+
+						break 2
+					fi
+
+					engines_read="$(( engines_read + 1 ))"
+
 					"$@" "$engine" || mce_for_each_engine_choose_status "$?"
 				done
 			done < <(mce_finish_with_exit_status mce_asg_instance_private_ip_addresses "$id")
+
+			if (( engines_read < 1 )); then
+				mce_diag_always '%s: there are no private IPs for autoscaling instance ID %s in auto-scaling group "%s" (is this the correct auto-scaling group?)\n' \
+					"$MCE_SCRIPT_NAME" "$id" "${MCE_AUTO_SCALING_GROUP_NAME?}"
+			fi
 		done
 	done < <(mce_finish_with_exit_status mce_asg_instance_ids "${MCE_AUTO_SCALING_GROUP_NAME?}")
+
+	if (( ids_read < 1 )); then
+		mce_diag_always '%s: there are no instance IDs associated with auto-scaling group "%s" (is this the correct auto-scaling group?)\n' \
+			"$MCE_SCRIPT_NAME" "${MCE_AUTO_SCALING_GROUP_NAME?}"
+	fi
 
 	return "$mce_for_each_engine_status"
 }
@@ -509,7 +528,7 @@ fi
 
 mce_enforce_option_definition() {
 	if (( "$#" < 1 )); then
-		printf 1>&2 -- 'Usage: %s OPTION_DESCRIPTION [CLI_FLAG] [ENVIRONMENT_VARIABLE] \n' "${FUNCNAME[0]}"
+		printf 1>&2 -- 'Usage: %s OPTION_DESCRIPTION [CLI_FLAG] [ENVIRONMENT_VARIABLE]\n' "${FUNCNAME[0]}"
 		return 64
 	fi
 

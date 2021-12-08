@@ -49,6 +49,13 @@ run_mce_fail_aws_ec2_describe_instances() {
     AWS_EC2_DESCRIBE_INSTANCES_EXIT_STATUS=1 run_mce "$@"
 }
 
+run_mce_empty_aws_autoscaling_describe_autoscaling_groups() {
+    AWS_AUTO_SCALING_DESCRIBE_AUTO_SCALING_GROUPS_EMPTY=1 run_mce "$@"
+}
+
+run_mce_empty_aws_ec2_describe_instances() {
+    AWS_EC2_DESCRIBE_INSTANCES_EMPTY=1 run_mce "$@"
+}
 
 run_mce_fail_mysql_nodes_in_servergroup() {
     MYSQL_NODES_IN_SERVERGROUP_EXIT_STATUS=1 run_mce "$@"
@@ -110,7 +117,24 @@ run_mce_cluster_actions_take_too_long() {
     [[ "$output" == *'manage_engine_nodes.pl'*'bypass'*'action=restore'* ]]
 }
 
-@test 'exits nonzero (but still registers engines) if listing EC2 instances fails' {
+@test 'issues a warning (but exits with zero) if no autoscaling groups were listed' {
+    run_mce_empty_aws_autoscaling_describe_autoscaling_groups online
+
+    (( status == 0 ))
+
+    [[ "$output" == *'there are no instance IDs associated with auto-scaling group'*'(is this the correct auto-scaling group?)'* ]]
+
+    [[ "$output" != *'manage_cluster.pl'*'addengine'*"${ACTIVE_REGISTERED_IP}"* ]]
+    [[ "$output" != *'manage_cluster.pl'*'addengine'*"${ACTIVE_UNREGISTERED_IP}"* ]]
+    [[ "$output" != *'manage_cluster.pl'*'addengine'*"${INACTIVE_REGISTERED_IP}"* ]]
+    [[ "$output" != *'manage_cluster.pl'*'addengine'*"${INACTIVE_UNREGISTERED_IP}"* ]]
+
+    [[ "$output" != *'manage_cluster.pl'*'setnodestatus'*'up'* ]]
+
+    [[ "$output" != *'manage_engine_nodes.pl'*'bypass'*'action=restore'* ]]
+}
+
+@test 'exits nonzero (but still registers engines) if listing ec2 instances fails' {
     run_mce_fail_aws_ec2_describe_instances online
 
     (( status != 0 ))
@@ -123,6 +147,23 @@ run_mce_cluster_actions_take_too_long() {
     [[ "$output" == *'manage_cluster.pl'*'setnodestatus'*'up'* ]]
 
     [[ "$output" == *'manage_engine_nodes.pl'*'bypass'*'action=restore'* ]]
+}
+
+@test 'issues a warning (but exits with zero) if no ec2 instances were listed' {
+    run_mce_empty_aws_ec2_describe_instances online
+
+    (( status == 0 ))
+
+	[[ "$output" == *'there are no private IPs for autoscaling instance ID'*'in auto-scaling group'*'(is this the correct auto-scaling group?)'* ]]
+
+    [[ "$output" != *'manage_cluster.pl'*'addengine'*"${ACTIVE_REGISTERED_IP}"* ]]
+    [[ "$output" != *'manage_cluster.pl'*'addengine'*"${ACTIVE_UNREGISTERED_IP}"* ]]
+    [[ "$output" != *'manage_cluster.pl'*'addengine'*"${INACTIVE_REGISTERED_IP}"* ]]
+    [[ "$output" != *'manage_cluster.pl'*'addengine'*"${INACTIVE_UNREGISTERED_IP}"* ]]
+
+    [[ "$output" != *'manage_cluster.pl'*'setnodestatus'*'up'* ]]
+
+    [[ "$output" != *'manage_engine_nodes.pl'*'bypass'*'action=restore'* ]]
 }
 
 @test 'does not unregister engines if listing autoscaling groups fails' {
